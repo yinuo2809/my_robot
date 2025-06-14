@@ -80,24 +80,29 @@ class H1RoughCfg( LeggedRobotCfg ):
     class rewards( LeggedRobotCfg.rewards ):
         soft_dof_pos_limit = 0.9
         base_height_target = 1.05
+        pitch_target = 0
         class scales( LeggedRobotCfg.rewards.scales ):
-            tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
-            lin_vel_z = -2.0
-            ang_vel_xy = -0.05
-            orientation = -1.0
-            base_height = -10.0
+            termination = -200
+            tracking_lin_vel = 2.0
+            tracking_ang_vel = 2.0
+            lin_vel_z = -0.1
+            ang_vel_xy = -0.5
+            # orientation = -1.0
+            base_height = -40.0
             dof_acc = -2.5e-7
-            feet_air_time = 0.0
-            collision = -1.0
+            # feet_air_time = 0.0
+            # collision = -1.0
             action_rate = -0.01
-            torques = 0.0
-            dof_pos_limits = -5.0
-            alive = 0.15
-            hip_pos = -1.0
-            contact_no_vel = -0.2
-            feet_swing_height = -20.0
-            contact = 0.18
+            torques = -5e-6
+            # dof_pos_limits = -5.0
+            # alive = 0.15
+            # hip_pos = -1.0
+            # contact_no_vel = -0.2
+            feet_swing_height = -30.0
+            contact = -2.0
+            smoothness = -0.01
+            feet_slip = -0.2
+            pitch_tracking = -10.0
 
 class H1RoughCfgPPO( LeggedRobotCfgPPO ):
     class policy:

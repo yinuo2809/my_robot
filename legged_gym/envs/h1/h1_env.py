@@ -57,14 +57,46 @@ class H1Robot(LeggedRobot):
 
         period = 0.8
         offset = 0.5
-        self.phase = (self.episode_length_buf * self.dt) % period / period
-        self.phase_left = self.phase
-        self.phase_right = (self.phase + offset) % 1
+        f_t = 1 / period
+        # self.phase = (self.episode_length_buf * self.dt) % period / period
+        # self.phase_left = self.phase
+        # self.phase_right = (self.phase_left + offset) % 1
+        # self.leg_phase = torch.cat([self.phase_left.unsqueeze(1), self.phase_right.unsqueeze(1)], dim=-1)
+
+        if not hasattr(self, 'phase_left'):
+            self.phase_left = torch.zeros(self.num_envs, device=self.device)
+            self.phase_right = torch.zeros(self.num_envs, device=self.device)
+        self.phase_left = (self.phase_left + f_t * self.dt) % 1
+        self.phase_right = (self.phase_left + offset) % 1
         self.leg_phase = torch.cat([self.phase_left.unsqueeze(1), self.phase_right.unsqueeze(1)], dim=-1)
         
         return super()._post_physics_step_callback()
     
-    
+    def homogenize_phase(self, phi=None, phi_stance=0.5):
+        if phi is None:
+            phi = self.leg_phase
+        phase_bar = torch.where(
+            phi < phi_stance,
+            0.5 * phi / phi_stance,
+            0.5 + 0.5 * (phi - phi_stance) / (1 - phi_stance)
+        )
+        return phase_bar
+
+
+    def contact_distribution(self, phi=None, sigma=0.05):
+        if phi is None:
+            phi = self.leg_phase
+
+        std_normal = torch.distributions.Normal(0.0, 1.0)
+
+        def coefficient(x):
+            return std_normal.cdf(x)
+
+        Eq1 = coefficient(phi / sigma) * (1 - coefficient((phi - 0.5) / sigma))
+        Eq2 = coefficient((phi - 1.0) / sigma) * (1 - coefficient((phi - 1.5) / sigma))
+        return Eq1 + Eq2
+
+
     def compute_observations(self):
         """ Computes observations
         """
@@ -93,20 +125,32 @@ class H1Robot(LeggedRobot):
         # add noise if needed
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
-
         
-    def _reward_contact(self):
-        res = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-        for i in range(self.feet_num):
-            is_stance = self.leg_phase[:, i] < 0.55
-            contact = self.contact_forces[:, self.feet_indices[i], 2] > 1
-            res += ~(contact ^ is_stance)
+    def _reward_contact(self, sigma_cf = 50, sigma_cv = 5):
+        # res = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        # for i in range(self.feet_num):
+        #     is_stance = self.leg_phase[:, i] < 0.55
+        #     contact = self.contact_forces[:, self.feet_indices[i], 2] > 1
+        #     res += ~(contact ^ is_stance)
+        # return res
+        c_distribution = self.contact_distribution()
+        res = -torch.sum((1 - c_distribution) * (1 - torch.exp(self.contact_forces[:, self.feet_indices, 2]**2 / sigma_cf)))  \
+              -torch.sum(c_distribution * (1 - torch.exp(torch.norm(self.feet_vel[:, :, :2], dim=-1) ** 2 / sigma_cv)))
         return res
     
     def _reward_feet_swing_height(self):
-        contact = torch.norm(self.contact_forces[:, self.feet_indices, :3], dim=2) > 1.
-        pos_error = torch.square(self.feet_pos[:, :, 2] - 0.08) * ~contact
-        return torch.sum(pos_error, dim=(1))
+        # contact = torch.norm(self.contact_forces[:, self.feet_indices, :3], dim=2) > 1.
+        # pos_error = torch.square(self.feet_pos[:, :, 2] - 0.08) * ~contact
+        # return torch.sum(pos_error, dim=(1))
+        c_distribution = self.contact_distribution()
+        phase_bar = self.homogenize_phase()
+        a = torch.tensor([0.0, 0.0, 10.0, -15.0, 6.0, 0.0], device=phase_bar.device) 
+        x = 0.25 - torch.abs(phase_bar - 0.75)
+        powers = torch.stack([x**k for k in range(6)], dim=-1)
+        poly = torch.sum(powers * a)
+        feet_height_target = torch.where(phase_bar > 0.5, swing_height_command * poly, 0)
+        res = torch.sum((1 - c_distribution) * (feet_height_target - self.feet_pos[:, :, 2])** 2)
+        return res
     
     def _reward_alive(self):
         # Reward for staying alive
@@ -122,3 +166,12 @@ class H1Robot(LeggedRobot):
     def _reward_hip_pos(self):
         return torch.sum(torch.square(self.dof_pos[:,[0,1,5,6]]), dim=1)
     
+    def _reward_action_smoothness(self):
+        return torch.sum(torch.square(self.last_last_actions - 2*self.last_actions + self.actions))
+    
+    def _reward_feet_slip(self):
+        penalize = torch.sum(torch.exp(torch.norm(self.feet_vel[:, :, :2], dim=-1) ** 2))
+        return 1 - penalize
+    
+    def _reward_pitch_tracking(self):
+        return torch.sum(torch.square(self.cfg.rewards.pitch_target - self.rpy[:,1]))
