@@ -1,5 +1,5 @@
 # 
-policy_path: "{LEGGED_GYM_ROOT_DIR}/deploy/pre_train/h1/motion.pt"
+policy_path: "{LEGGED_GYM_ROOT_DIR}/logs/h1/exported/policies/policy_lstm_1.pt"
 xml_path: "{LEGGED_GYM_ROOT_DIR}/resources/robots/h1/scene.xml"
 
 # Total simulation time
