@@ -245,7 +245,7 @@ class GO2CfgPPO_Handstand(LeggedRobotCfgPPO):
         max_iterations = 15000 # number of policy updates
 
         # logging
-        save_interval = 200 # check for potential saves every this many iterations
+        save_interval = 50 # check for potential saves every this many iterations
         experiment_name = 'go2_handstand_first'
         run_name = ''
         # load and resume

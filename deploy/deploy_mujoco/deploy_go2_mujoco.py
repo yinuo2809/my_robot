@@ -28,28 +28,51 @@ def pd_control(target_q, q, kp, target_dq, dq, kd):
     return (target_q - q) * kp + (target_dq - dq) * kd 
 from pynput import keyboard
 
-def key_callback(key):
-    try:
-        print(key.char)
-        if key.char == '6':
-            cmd[0] += 0.5
-        elif key.char == '7':
-            cmd[0]  -= 0.5
-        elif key.char == '8':
-            cmd[1]  += 0.5
-        elif key.char == '9':
-            cmd[1]  -= 0.5
-        elif key.char == '-':
-            cmd[2]  += 0.5
-        elif key.char == '=':
-            cmd[2]  -= 0.5
-        elif key.char == '1':
-            cmd[0]=0
-            cmd[1]=0
-            cmd[2]=0
+# def key_callback(key):
+#     try:
+#         print(key.char)
+#         if key.char == '6':
+#             cmd[0] += 0.5
+#         elif key.char == '7':
+#             cmd[0]  -= 0.5
+#         elif key.char == '8':
+#             cmd[1]  += 0.5
+#         elif key.char == '9':
+#             cmd[1]  -= 0.5
+#         elif key.char == '-':
+#             cmd[2]  += 0.5
+#         elif key.char == '=':
+#             cmd[2]  -= 0.5
+#         elif key.char == '1':
+#             cmd[0]=0
+#             cmd[1]=0
+#             cmd[2]=0
 
-    except AttributeError:
-        pass
+#     except AttributeError:
+#         pass
+def key_callback(key):
+    global cmd
+    try:
+        if key == keyboard.Key.up:
+            cmd[0] += 0.1
+        elif key == keyboard.Key.down:
+            cmd[0] -= 0.1
+        elif key == keyboard.Key.left:
+            cmd[2] += 0.1
+        elif key == keyboard.Key.right:
+            cmd[2] -= 0.1
+        elif hasattr(key, 'char'):
+            if key.char == 'a':
+                cmd[1] += 0.1
+            elif key.char == 'd':
+                cmd[1] -= 0.1
+            elif key.char == 'r':
+                cmd[:] = 0.0
+        cmd = np.clip(cmd, -1.5, 1.5)
+        print("cmd =", cmd)
+    except Exception as e:
+        print("key_callback error:", e)
+
 listener = keyboard.Listener(on_press=key_callback)
 listener.start()
 if __name__ == "__main__":
@@ -86,6 +109,7 @@ if __name__ == "__main__":
         
         cmd = np.array(config["cmd_init"], dtype=np.float32)
 
+
     # define context variables
     action = np.zeros(num_actions, dtype=np.float32)
     target_dof_pos = default_angles.copy()
@@ -101,7 +125,7 @@ if __name__ == "__main__":
     # load policy
     policy = torch.jit.load(policy_path)
 
-    with mujoco.viewer.launch_passive(m, d,key_callback=key_callback) as viewer:
+    with mujoco.viewer.launch_passive(m, d) as viewer:
         # Close the viewer automatically after simulation_duration wall-seconds.
         start = time.time()
         while viewer.is_running() and time.time() - start < 1000000:

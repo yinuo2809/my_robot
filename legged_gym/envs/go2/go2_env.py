@@ -862,8 +862,8 @@ class Go2_stand(BaseTask):
         return torch.sum(torch.abs(self.torques), dim=1)
 
     def _reward_dof_vel(self):
-        # Penalize dof velocities
         return torch.sum(torch.square(self.dof_vel), dim=1)
+        # Penalize dof velocities
     
     def _reward_dof_acc(self):
         # Penalize dof accelerations
