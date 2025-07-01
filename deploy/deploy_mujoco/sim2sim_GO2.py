@@ -193,7 +193,7 @@ if __name__ == '__main__':
 
     class Sim2simCfg(GO2_Jump_Cfg):
         class sim_config:
-            mujoco_model_path = f'{LEGGED_GYM_ROOT_DIR}/resources/go2/go2/scene.xml'
+            mujoco_model_path = f'{LEGGED_GYM_ROOT_DIR}/resources/robots/go2/go2/scene.xml'
             sim_duration = 120.0
             dt = 0.005
             decimation = 4
