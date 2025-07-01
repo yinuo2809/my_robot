@@ -124,9 +124,9 @@ class GO2_JUMP_Robot(BaseTask):
             self.gym.refresh_actor_root_state_tensor(self.sim)
             self.base_quat[:] = self.root_states[:, 3:7]
             self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
-            self.base_euler_xyz = get_euler_xyz_tensor(self.base_quat)
+            self.rpy[:] = get_euler_xyz_in_tensor(self.base_quat[:])
             self.obs_imu_latency_buffer[:,:,1:] = self.obs_imu_latency_buffer[:,:,:self.cfg.domain_rand.range_obs_imu_latency[1]].clone()
-            self.obs_imu_latency_buffer[:,:,0] = torch.cat((self.base_ang_vel * self.obs_scales.ang_vel, self.base_euler_xyz * self.obs_scales.quat), 1).clone() 
+            self.obs_imu_latency_buffer[:,:,0] = torch.cat((self.base_ang_vel * self.obs_scales.ang_vel, self.rpy * self.obs_scales.quat), 1).clone() 
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -135,6 +135,7 @@ class GO2_JUMP_Robot(BaseTask):
         """
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         self.episode_length_buf += 1
         self.common_step_counter += 1
@@ -146,7 +147,6 @@ class GO2_JUMP_Robot(BaseTask):
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
-
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
@@ -155,8 +155,6 @@ class GO2_JUMP_Robot(BaseTask):
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
         
-        if self.cfg.domain_rand.push_robots:
-            self._push_robots()
 
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
@@ -165,6 +163,9 @@ class GO2_JUMP_Robot(BaseTask):
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
         self.last_rigid_state[:] = self.rigid_state[:]
+
+        if self.viewer and self.enable_viewer_sync and self.debug_viz:
+            self._draw_debug_vis()
 
     def check_termination(self):
         """ Check if environments need to be reset
@@ -202,10 +203,14 @@ class GO2_JUMP_Robot(BaseTask):
         self.last_last_actions[env_ids] = 0.
         self.actions[env_ids] = 0.
         self.last_actions[env_ids] = 0.
+        self.last_rigid_state[env_ids] = 0.
         self.last_dof_vel[env_ids] = 0.
         self.feet_air_time[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
-        self.reset_buf[env_ids] = 1
+        self.reset_buf[env_ids] = 0
+
+        # reset latency buffers and randomization
+        self._reset_latency_buffer(env_ids)
         # fill extras
         self.extras["episode"] = {}
         for key in self.episode_sums.keys():
@@ -222,7 +227,7 @@ class GO2_JUMP_Robot(BaseTask):
 
         # fix reset gravity bug
         self.base_quat[env_ids] = self.root_states[env_ids, 3:7]
-        self.base_euler_xyz = get_euler_xyz_tensor(self.base_quat)
+        self.rpy[:] = get_euler_xyz_in_tensor(self.base_quat[:])
         self.projected_gravity[env_ids] = quat_rotate_inverse(self.base_quat[env_ids], self.gravity_vec[env_ids])
         self.base_lin_vel[env_ids] = quat_rotate_inverse(self.base_quat[env_ids], self.root_states[env_ids, 7:10])
         self.base_ang_vel[env_ids] = quat_rotate_inverse(self.base_quat[env_ids], self.root_states[env_ids, 10:13])
@@ -290,7 +295,7 @@ class GO2_JUMP_Robot(BaseTask):
             self.actions,  # 12
             self.base_lin_vel * self.obs_scales.lin_vel,  # 3
             self.base_ang_vel * self.obs_scales.ang_vel,  # 3
-            self.base_euler_xyz *self.cfg.normalization.obs_scales.quat,  # 3
+            self.rpy *self.cfg.normalization.obs_scales.quat,  # 3
             self.env_frictions,  # 1
             self.body_mass / 10.,  # 1
             stance_mask,  # 2
@@ -309,7 +314,7 @@ class GO2_JUMP_Robot(BaseTask):
         if self.cfg.domain_rand.randomize_obs_imu_latency:
             self.obs_imu = self.obs_imu_latency_buffer[torch.arange(self.num_envs), :, self.obs_imu_latency_simstep.long()]
         else:              
-            self.obs_imu = torch.cat((self.base_ang_vel * self.obs_scales.ang_vel, self.base_euler_xyz * self.obs_scales.quat), 1)
+            self.obs_imu = torch.cat((self.base_ang_vel * self.obs_scales.ang_vel, self.rpy * self.obs_scales.quat), 1)
 
         obs_buf = torch.cat((
             self.command_input,  # 5 = 2D(sin cos) + 3D(vel_x, vel_y, aug_vel_yaw)
@@ -375,7 +380,7 @@ class GO2_JUMP_Robot(BaseTask):
             if env_id==0:
                 # prepare friction randomization
                 friction_range = self.cfg.domain_rand.friction_range
-                num_buckets = 64
+                num_buckets = 256
                 bucket_ids = torch.randint(0, num_buckets, (self.num_envs, 1))
                 friction_buckets = torch_rand_float(friction_range[0], friction_range[1], (num_buckets,1), device='cpu')
                 self.friction_coeffs = friction_buckets[bucket_ids]
@@ -525,7 +530,7 @@ class GO2_JUMP_Robot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
         """
-        self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+        self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(-0.1, 0.1, (len(env_ids), self.num_dof), device=self.device)
         self.dof_vel[env_ids] = 0.
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -543,7 +548,7 @@ class GO2_JUMP_Robot(BaseTask):
         if self.custom_origins:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
-            self.root_states[env_ids, :2] += torch_rand_float(-1., 1., (len(env_ids), 2), device=self.device) # xy position within 1m of the center
+            self.root_states[env_ids, :2] += torch_rand_float(-4., 4., (len(env_ids), 2), device=self.device) # xy position within 1m of the center
         else:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
@@ -586,19 +591,11 @@ class GO2_JUMP_Robot(BaseTask):
     def _push_robots(self):
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
         """
-        env_ids = torch.arange(self.num_envs, device=self.device)
-        push_env_ids = env_ids[self.episode_length_buf[env_ids] % int(self.cfg.domain_rand.push_interval) == 0]
-        if len(push_env_ids) == 0:
-            return
         max_vel = self.cfg.domain_rand.max_push_vel_xy
-        self.root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2), device=self.device) # lin vel x/y
-        
         max_push_angular = self.cfg.domain_rand.max_push_ang_vel
+        self.root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2), device=self.device) # lin vel x/y
         self.root_states[:, 10:13] = torch_rand_float(-max_push_angular, max_push_angular, (self.num_envs, 3), device=self.device) # ang vel
-        env_ids_int32 = push_env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                    gymtorch.unwrap_tensor(self.root_states),
-                                                    gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(self.root_states))
 
    
     def _update_terrain_curriculum(self, env_ids):
@@ -691,9 +688,6 @@ class GO2_JUMP_Robot(BaseTask):
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.torque_multiplier = torch.ones(self.num_envs, self.num_actions, dtype=torch.float, device=self.device,requires_grad=False)
-        self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -1109,7 +1103,8 @@ class GO2_JUMP_Robot(BaseTask):
     
     def _reward_dof_acc(self):
         # Penalize dof accelerations
-        return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
+        # return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
+        return torch.sum(torch.square((self.last_dof_vel - self.dof_vel)), dim=1)
     
     def _reward_action_rate(self):
         # Penalize changes in actions

@@ -155,7 +155,7 @@ class GO2_Jump_Cfg( LeggedRobotCfg ):
             base_height = 1.0#0.1 
             feet_air_time =  1.0
             collision = -1.
-            feet_stumble = -0.0 
+            stumble = -0.0 
             action_rate = -0.01
             stand_still = -2.
             default_pos =-0.1####
