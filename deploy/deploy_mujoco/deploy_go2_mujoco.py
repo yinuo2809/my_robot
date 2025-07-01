@@ -187,8 +187,8 @@ if __name__ == "__main__":
                 action = policy(obs_tensor).detach().numpy().squeeze()
                 # transform action to target_dof_pos
                 target_dof_pos = action * action_scale + default_angles
-                with open("/home/chen/Documents/unitree_robot/unitree_rl_gym/deploy/deploy_mujoco/simulation_data.txt", "a+") as file:
-                    file.write(str(omega[0])+","+str(omega[1])+","+str(omega[2])+"\n")
+                # with open("/home/chen/Documents/unitree_robot/unitree_rl_gym/deploy/deploy_mujoco/simulation_data.txt", "a+") as file:
+                #     file.write(str(omega[0])+","+str(omega[1])+","+str(omega[2])+"\n")
             # Pick up changes to the physics state, apply perturbations, update options from GUI.
             viewer.sync()
 
